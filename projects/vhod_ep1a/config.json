@@ -1,0 +1,26 @@
+{
+ "title": "Входящие: фрагмент 1",
+ "aspect": "16:9",
+ "resolution": "1080p",
+ "fps": 24,
+ "style": "midnight",
+ "voiceover": "input/voiceover.wav",
+ "script": null,
+ "duration": 63.84,
+ "captions": true,
+ "bars": "none",
+ "fadeIn": 0.6,
+ "fadeOut": 1.2,
+ "music": {
+  "enabled": false
+ },
+ "sfx": {
+  "enabled": false
+ },
+ "loudness": -16,
+ "captionStyle": {
+  "y": 985,
+  "size": 58,
+  "max": 5
+ }
+}

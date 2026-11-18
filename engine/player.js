@@ -7,7 +7,7 @@ import { captions } from './ui2d.js';
 const q = new URLSearchParams(location.search);
 const PROJ = '/project';
 const RES = { '720p': 720, '1080p': 1080, '1440p': 1440, '2160p': 2160, '4k': 2160 };
-let main, mg, bufA, bufB, bufT, bufC, glCanvas, grainTiles = [], three = null;
+let main, mg, bufA, bufB, bufT, bufC, bloomA, bloomB, glCanvas, grainTiles = [], three = null;
 const errors = (window.ERRORS = []);
 const mk = (w, h) => { const c = document.createElement('canvas'); c.width = w; c.height = h; return c; };
 
@@ -38,6 +38,7 @@ async function boot() {
   main = document.getElementById('main'); main.width = outW; main.height = outH; mg = main.getContext('2d', { willReadFrequently: true });
   buildLUT();
   bufA = mk(outW, outH); bufB = mk(outW, outH); bufT = mk(outW, outH); bufC = mk(outW, outH);
+  bloomA = mk(Math.max(8, Math.ceil(outW / 4)), Math.max(8, Math.ceil(outH / 4))); bloomB = mk(Math.max(8, Math.ceil(outW / 10)), Math.max(8, Math.ceil(outH / 10)));
   const gw = Math.ceil(outW / 2), gh = Math.ceil(outH / 2);
   for (let k = 0; k < 4; k++) { const c = mk(gw, gh), x = c.getContext('2d'), id = x.createImageData(gw, gh); let s = 1234 + k * 999; for (let i = 0; i < id.data.length; i += 4) { s = (s * 1664525 + 1013904223) >>> 0; const v = s >>> 24; id.data[i] = id.data[i + 1] = id.data[i + 2] = v; id.data[i + 3] = 255; } x.putImageData(id, 0, 0); grainTiles.push(c); }
   const list = await (await fetch(`/__manifest`)).json();
@@ -47,6 +48,19 @@ async function boot() {
   window.DURATION = dur; window.TOTAL_FRAMES = Math.ceil(dur * E.fps); window.OUT = [outW, outH];
   window.SHOT_LIST = E.shots.map(s => ({ id: s.id, start: s.start, end: s.end, ok: !!getShot(s.id) }));
   window.READY = true;
+}
+
+
+// BLOOM: выделяем яркое (контраст), размываем в двух масштабах и добавляем светом. Сила = grade.bloom (0..1).
+function bloomPass(W, H, amt) {
+  if (!amt || amt <= 0) return;
+  const a = bloomA.getContext('2d'), b = bloomB.getContext('2d');
+  a.setTransform(1, 0, 0, 1, 0, 0); a.globalCompositeOperation = 'source-over'; a.globalAlpha = 1; a.clearRect(0, 0, bloomA.width, bloomA.height);
+  a.filter = 'brightness(0.8) contrast(2.6) saturate(1.2)'; a.drawImage(main, 0, 0, bloomA.width, bloomA.height); a.filter = 'none';
+  b.setTransform(1, 0, 0, 1, 0, 0); b.clearRect(0, 0, bloomB.width, bloomB.height); b.filter = 'blur(6px)'; b.drawImage(bloomA, 0, 0, bloomB.width, bloomB.height); b.filter = 'none';
+  const t = mg; t.save(); t.setTransform(1, 0, 0, 1, 0, 0); t.globalCompositeOperation = 'lighter'; t.imageSmoothingEnabled = true; t.imageSmoothingQuality = 'high';
+  t.globalAlpha = Math.min(1, amt * 0.4); t.filter = 'blur(5px)'; t.drawImage(bloomA, 0, 0, W, H); t.filter = 'none';
+  t.globalAlpha = Math.min(1, amt * 0.55); t.drawImage(bloomB, 0, 0, W, H); t.restore();
 }
 
 // colour grade: per-channel lift/gamma/gain + contrast as LUTs, saturation per pixel
@@ -150,6 +164,7 @@ window.renderFrame = function (f) {
   } else mg.drawImage(bufA, 0, 0);
   mg.globalAlpha = 1; mg.filter = 'none'; mg.setTransform(1, 0, 0, 1, 0, 0);
   applyGrade(W, H);
+  bloomPass(W, H, grade.bloom || 0);
   if (grade.tint) { mg.globalCompositeOperation = grade.tint[1]; mg.fillStyle = alpha(grade.tint[0], grade.tint[2]); mg.fillRect(0, 0, W, H); mg.globalCompositeOperation = 'source-over'; }
   if (shot.vignette !== false && grade.vignette > 0) { const v = mg.createRadialGradient(W / 2, H / 2, Math.min(W, H) * 0.35, W / 2, H / 2, Math.max(W, H) * 0.62); v.addColorStop(0, 'rgba(0,0,0,0)'); v.addColorStop(1, `rgba(0,0,0,${grade.vignette})`); mg.fillStyle = v; mg.fillRect(0, 0, W, H); }
   if (grade.grain > 0) { mg.save(); mg.globalAlpha = grade.grain; mg.globalCompositeOperation = 'overlay'; mg.drawImage(grainTiles[f % 4], 0, 0, W, H); mg.restore(); }
