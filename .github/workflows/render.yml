@@ -1,0 +1,92 @@
+name: render-video
+
+on:
+  workflow_dispatch:
+    inputs:
+      project:
+        description: "Папка проекта в projects/"
+        default: "vhodyashchie"
+      chunk_seconds:
+        description: "Длина одного куска в секундах (рендерятся параллельно)"
+        default: "6"
+
+permissions:
+  contents: read
+
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.m.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: m
+        run: |
+          python3 - <<'PY'
+          import json, math, os
+          p = "projects/${{ inputs.project }}"
+          cfg = json.load(open(f"{p}/config.json"))
+          story = json.load(open(f"{p}/story/shots.json"))
+          dur = story.get("duration") or cfg["duration"]
+          step = float("${{ inputs.chunk_seconds }}")
+          n = math.ceil(dur / step)
+          chunks = [{"i": i, "from": round(i * step, 3), "to": round(min(dur, (i + 1) * step), 3)} for i in range(n)]
+          open(os.environ["GITHUB_OUTPUT"], "a").write("matrix=" + json.dumps({"include": chunks}) + "\n")
+          print(f"{dur} s -> {n} кусков")
+          PY
+
+  render:
+    needs: plan
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJson(needs.plan.outputs.matrix) }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - run: sudo apt-get update -y && sudo apt-get install -y ffmpeg
+      - name: Рендер куска ${{ matrix.i }} (${{ matrix.from }}–${{ matrix.to }} с)
+        run: |
+          start=$(date +%s)
+          node render.mjs --project "projects/${{ inputs.project }}" --from ${{ matrix.from }} --to ${{ matrix.to }} --workers 2 --out "chunk_${{ matrix.i }}.mp4"
+          el=$(( $(date +%s) - start ))
+          frames=$(python3 -c "print(round((${{ matrix.to }}-${{ matrix.from }})*24))")
+          echo "кусок ${{ matrix.i }}: $frames кадров за ${el} с" | tee -a "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: chunk-${{ matrix.i }}
+          path: chunk_${{ matrix.i }}.mp4
+          retention-days: 3
+
+  assemble:
+    needs: render
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: sudo apt-get update -y && sudo apt-get install -y ffmpeg
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: chunk-*
+          merge-multiple: true
+      - name: Склейка и звук
+        run: |
+          ls chunk_*.mp4 | sort -V | sed "s/.*/file '&'/" > list.txt
+          ffmpeg -y -v error -f concat -safe 0 -i list.txt -c copy silent.mp4
+          VO=$(python3 -c "import json;print(json.load(open('projects/${{ inputs.project }}/config.json')).get('voiceover') or '')")
+          if [ -n "$VO" ] && [ -f "projects/${{ inputs.project }}/$VO" ]; then
+            ffmpeg -y -v error -i silent.mp4 -i "projects/${{ inputs.project }}/$VO" -c:v copy -c:a aac -b:a 192k -shortest final.mp4
+          else
+            cp silent.mp4 final.mp4
+          fi
+          ls -la final.mp4 | tee -a "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: final-${{ inputs.project }}
+          path: final.mp4
+          retention-days: 7

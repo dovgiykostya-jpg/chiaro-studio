@@ -1,0 +1,3 @@
+{ "title": "Входящие — тест", "duration": 8, "shots": [
+  { "id": "s001", "start": 0, "end": 5, "line": "бункер", "in": { "type": "cut" } },
+  { "id": "s002", "start": 5, "end": 8, "line": "крупно", "in": { "type": "cut" } } ] }
