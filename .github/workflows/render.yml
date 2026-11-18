@@ -50,8 +50,16 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npx playwright install --with-deps chromium
-      - uses: FedericoCarboni/setup-ffmpeg@v3
-        timeout-minutes: 3
+      - name: ffmpeg (npm-бинарник, 3 попытки)
+        timeout-minutes: 6
+        run: |
+          command -v ffmpeg >/dev/null 2>&1 && exit 0
+          for i in 1 2 3; do
+            (cd "$RUNNER_TEMP" && npm init -y >/dev/null && timeout 120 npm i ffmpeg-static) && break
+            sleep 5
+          done
+          sudo ln -sf "$(node -e "console.log(require('$RUNNER_TEMP/node_modules/ffmpeg-static'))")" /usr/local/bin/ffmpeg
+          ffmpeg -version | head -1
       - name: Рендер куска ${{ matrix.i }} (${{ matrix.from }}–${{ matrix.to }} с)
         run: |
           start=$(date +%s)
@@ -71,8 +79,16 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
-      - uses: FedericoCarboni/setup-ffmpeg@v3
-        timeout-minutes: 3
+      - name: ffmpeg (npm-бинарник, 3 попытки)
+        timeout-minutes: 6
+        run: |
+          command -v ffmpeg >/dev/null 2>&1 && exit 0
+          for i in 1 2 3; do
+            (cd "$RUNNER_TEMP" && npm init -y >/dev/null && timeout 120 npm i ffmpeg-static) && break
+            sleep 5
+          done
+          sudo ln -sf "$(node -e "console.log(require('$RUNNER_TEMP/node_modules/ffmpeg-static'))")" /usr/local/bin/ffmpeg
+          ffmpeg -version | head -1
       - uses: actions/download-artifact@v4
         with:
           pattern: chunk-*
